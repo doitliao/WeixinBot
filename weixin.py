@@ -935,22 +935,30 @@ class WebWeixin(object):
         user_id = self.getUSerID(name)
         response = self.webwxsendmsgemotion(user_id, media_id)
 
+    '''
+    登陆流程
+    1. getUUID获取uuid用来登陆，相当于一个验证码
+    2. 使用uuid作为参数获取登陆用的二维码，并打开系统默认程序打开二维码图片
+    3. 查询服务器状态，知道uuid对应的二维码倍手机扫描过
+    4. 查询服务器状态直到手机上确认登陆或者超时
+    '''
     @catchKeyboardInterrupt
     def start(self):
         self._echo('[*] 微信网页版 ... 开动')
         print()
         logging.debug('[*] 微信网页版 ... 开动')
         while True:
-            self._run('[*] 正在获取 uuid ... ', self.getUUID)
+            self._run('[*] 正在获取 uuid ... ', self.getUUID) #1. getUUID获取uuid用来登陆，相当于一个验证码
             self._echo('[*] 正在获取二维码 ... 成功')
             print()
             logging.debug('[*] 微信网页版 ... 开动')
-            self.genQRCode()
+            self.genQRCode()                                 #2. 使用uuid作为参数获取登陆用的二维码
             print('[*] 请使用微信扫描二维码以登录 ... ')
-            if not self.waitForLogin():
+            if not self.waitForLogin():                      #3. 查询服务器状态，知道uuid对应的二维码被手机扫描过，
+                                                             # 微信客户端扫描了二维码会给服务器发请求的。所以二维码是否被扫描能查到。
                 continue
                 print('[*] 请在手机上点击确认以登录 ... ')
-            if not self.waitForLogin(0):
+        if not self.waitForLogin(0):                         #4. 查询服务器状态直到手机上确认登陆或者超时
                 continue
             break
 
@@ -1015,13 +1023,16 @@ class WebWeixin(object):
                 self.sendEmotion(name, file_name)
                 logging.debug('发送表情')
 
+    #调用操作系统默认打开程序打开给定文件，比如图片会调用图片查看器，txt会调用记事本....
     def _safe_open(self, path):
         if self.autoOpen:
             if platform.system() == "Linux":
-                os.system("xdg-open %s &" % path)
+                #os.system 执行一条shell命令
+                os.system("xdg-open %s &" % path) #xdg-open ／ open 是一个查找默认打开程序的工具，最后的&表示后台执行
             else:
                 os.system('open %s &' % path)
 
+		#执行函数func, func返回值 ！= True退出程序。 加这层封装主要是为了在调用函数的时候答应日志，减少主干逻辑里的异常处理代码。
     def _run(self, str, func, *args):
         self._echo(str)
         if func(*args):
@@ -1033,9 +1044,10 @@ class WebWeixin(object):
             logging.debug('[*] 退出程序')
             exit()
 
+    #输出字符串
     def _echo(self, str):
-        sys.stdout.write(str)
-        sys.stdout.flush()
+        sys.stdout.write(str)  #写到缓冲区
+        sys.stdout.flush()   #强制刷新缓存区，默认情况下遇到换行符或者缓存区慢才会刷新
 
     def _printQR(self, mat):
         for i in mat:
