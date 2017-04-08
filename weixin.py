@@ -27,6 +27,7 @@ import mimetypes
 from requests_toolbelt.multipart.encoder import MultipartEncoder
 
 
+#绑定ctrl+c退出事件，退出前打印日志
 def catchKeyboardInterrupt(fn):
     def wrapper(*args):
         try:
@@ -36,6 +37,10 @@ def catchKeyboardInterrupt(fn):
             logging.debug('[*] 强制退出程序')
     return wrapper
 
+
+'''
+连个decode函数主要用来递归把数据list和dict转化成utf8编码
+'''
 
 def _decode_list(data):
     rv = []
@@ -123,6 +128,16 @@ class WebWeixin(object):
         opener.addheaders = [('User-agent', self.user_agent)]
         urllib.request.install_opener(opener)
 
+    #设置参数
+    '''
+      config = {
+        'DEBUG': ,   #TRUE or False 打开时输出的日志会更详细一些
+        'autoReplyMode': , #TRUE or False 打开时收到消息会自动回复
+        'user_agent': ,    #浏览器的标识，因为这是模拟网页版微信，所以要设置HTTP头信息里的浏览器标识。 IE， Chrome， Firefox or Safari
+        'interactive': ,
+        'autoOpen':
+      }
+    '''
     def loadConfig(self, config):
         if config['DEBUG']:
             self.DEBUG = config['DEBUG']
@@ -135,6 +150,7 @@ class WebWeixin(object):
         if config['autoOpen']:
             self.autoOpen = config['autoOpen']
 
+    #登陆前需要先访问服务器获得一个唯一的uuid，用来标识一次登陆
     def getUUID(self):
         url = 'https://login.weixin.qq.com/jslogin'
         params = {
@@ -146,17 +162,21 @@ class WebWeixin(object):
         #r = requests.get(url=url, params=params)
         #r.encoding = 'utf-8'
         #data = r.text
-        data = self._post(url, params, False).decode("utf-8")
+        data = self._post(url, params, False).decode("utf-8") #发送一个POST请求给服务器，并把返回值转换成utf8编码
         if data == '':
             return False
+        #这是一个正则表达式，匹配出window.QRLogin.code和window.QRLogin.uuid字段
         regx = r'window.QRLogin.code = (\d+); window.QRLogin.uuid = "(\S+?)"'
-        pm = re.search(regx, data)
+
+        pm = re.search(regx, data)  #从返回结果中用正则表达式过滤出uuid
         if pm:
             code = pm.group(1)
             self.uuid = pm.group(2)
             return code == '200'
         return False
-
+    
+    #根据上一步获取到的uuid，可以到服务器上下载对应的二维码（QRCode）
+    #调用函数显示对应二维码，等待用户扫描
     def genQRCode(self):
         #return self._showQRCodeImg()
         if sys.platform.startswith('win'):
@@ -183,7 +203,7 @@ class WebWeixin(object):
             subprocess.call(["open", QRCODE_PATH])
         else:
             return
-
+    #查询对应uuid的登陆状态，tip = 1查询二维码是否已经被扫描过， tip = 0查询扫描后是否已经确认登陆
     def waitForLogin(self, tip=1):
         time.sleep(tip)
         url = 'https://login.weixin.qq.com/cgi-bin/mmwebwx-bin/login?tip=%s&uuid=%s&_=%s' % (
@@ -194,7 +214,7 @@ class WebWeixin(object):
         pm = re.search(r"window.code=(\d+);", data)
         code = pm.group(1)
 
-        if code == '201':
+        if code == '201':  #201表示已经扫描， 200表示用户已经确认登陆，登陆成功时会返回登陆后的跳转链接window.redirect_uri
             return True
         elif code == '200':
             pm = re.search(r'window.redirect_uri="(\S+?)";', data)
@@ -207,7 +227,7 @@ class WebWeixin(object):
         else:
             self._echo('[登陆异常] \n')
         return False
-
+    #用户确认登陆后，需要到返回的window.redirect_uri链接获取对应的一些访问口令，用来认证后续的请求
     def login(self):
         data = self._get(self.redirect_uri)
         if data == '':
@@ -236,6 +256,7 @@ class WebWeixin(object):
         }
         return True
 
+    #初始化客户端，主要是在服务器端给客户端占位，因为每个客户端的登陆都要占用后台资源
     def webwxinit(self):
         url = self.base_uri + '/webwxinit?pass_ticket=%s&skey=%s&r=%s' % (
             self.pass_ticket, self.skey, int(time.time()))
@@ -253,6 +274,7 @@ class WebWeixin(object):
 
         return dic['BaseResponse']['Ret'] == 0
 
+    #给服务器发请求，将客户端设置成消息自动通知。因为可以多终端同时登陆的，默认情况消息时只通知一个客户端的，所以自动通知要主动打开。
     def webwxstatusnotify(self):
         url = self.base_uri + \
             '/webwxstatusnotify?lang=zh_CN&pass_ticket=%s' % (self.pass_ticket)
@@ -268,7 +290,7 @@ class WebWeixin(object):
             return False
 
         return dic['BaseResponse']['Ret'] == 0
-
+    #请求服务器获取用户联系人列表
     def webwxgetcontact(self):
         SpecialUsers = self.SpecialUsers
         url = self.base_uri + '/webwxgetcontact?pass_ticket=%s&skey=%s&r=%s' % (
@@ -300,7 +322,7 @@ class WebWeixin(object):
         self.ContactList = ContactList
 
         return True
-
+    #获取所有群的群成员列表
     def webwxbatchgetcontact(self):
         url = self.base_uri + \
             '/webwxbatchgetcontact?type=ex&r=%s&pass_ticket=%s' % (
@@ -325,7 +347,7 @@ class WebWeixin(object):
             for member in MemberList:
                 self.GroupMemeberList.append(member)
         return True
-
+    #每个用户或者裙都用ID做唯一表示，这里通过ID获取指定用户或者群的详细资料信息
     def getNameById(self, id):
         url = self.base_uri + \
             '/webwxbatchgetcontact?type=ex&r=%s&pass_ticket=%s' % (
@@ -342,6 +364,7 @@ class WebWeixin(object):
         # blabla ...
         return dic['ContactList']
 
+    #testsynccheck和synccheck配合检查wx所有域名，使用之前登陆的=得到的口令查询客户端是否有新消息。
     def testsynccheck(self):
         SyncHost = ['wx2.qq.com',
                     'webpush.wx2.qq.com',
@@ -386,7 +409,7 @@ class WebWeixin(object):
         retcode = pm.group(1)
         selector = pm.group(2)
         return [retcode, selector]
-
+    #查到有新消息后，从服务器端获取实际的消息内容
     def webwxsync(self):
         url = self.base_uri + \
             '/webwxsync?sid=%s&skey=%s&pass_ticket=%s' % (
@@ -408,7 +431,7 @@ class WebWeixin(object):
             self.synckey = '|'.join(
                 [str(keyVal['Key']) + '_' + str(keyVal['Val']) for keyVal in self.SyncKey['List']])
         return dic
-
+    #以下4个为不同类型消息的发送函数
     def webwxsendmsg(self, word, to='filehelper'):
         url = self.base_uri + \
             '/webwxsendmsg?pass_ticket=%s' % (self.pass_ticket)
@@ -551,7 +574,7 @@ class WebWeixin(object):
             print(json.dumps(dic, indent=4))
             logging.debug(json.dumps(dic, indent=4))
         return dic['BaseResponse']['Ret'] == 0
-
+    #数据data字段保存到文件中
     def _saveFile(self, filename, data, api=None):
         fn = filename
         if self.saveSubFolders[api]:
@@ -565,6 +588,8 @@ class WebWeixin(object):
                 f.close()
         return fn
 
+    #获取ID指定的用户头像
+    #具体icon 、 head image和msg image有什么不同就搞不懂了
     def webwxgeticon(self, id):
         url = self.base_uri + \
             '/webwxgeticon?username=%s&skey=%s' % (id, self.skey)
@@ -611,6 +636,7 @@ class WebWeixin(object):
         fn = 'voice_' + msgid + '.mp3'
         return self._saveFile(fn, data, 'webwxgetvoice')
 
+    #根据ID获取群名称
     def getGroupName(self, id):
         name = '未知群'
         for member in self.GroupList:
@@ -628,6 +654,7 @@ class WebWeixin(object):
                         self.GroupMemeberList.append(member)
         return name
 
+    #获取用户备注信息
     def getUserRemarkName(self, id):
         name = '未知群' if id[:2] == '@@' else '陌生人'
         if id == self.User['UserName']:
@@ -663,7 +690,7 @@ class WebWeixin(object):
         if name == '未知群' or name == '陌生人':
             logging.debug(id)
         return name
-
+    #根据名字获取ID
     def getUSerID(self, name):
         for member in self.MemberList:
             if name == member['RemarkName'] or name == member['NickName']:
@@ -743,6 +770,7 @@ class WebWeixin(object):
             logging.info('%s %s -> %s: %s' % (message_id, srcName.strip(),
                                               dstName.strip(), content.replace('<br/>', '\n')))
 
+    #收到一堆消息后的处理函数，比如收到文本消息、名片等打印， 图片就显示出来。。。 如果开启自动回复还会自动选一条回复消息发回去
     def handleMsg(self, r):
         for msg in r['AddMsgList']:
             print('[*] 你有新的消息，请注意查收')
@@ -843,6 +871,7 @@ class WebWeixin(object):
                     'raw_msg': msg, 'message': '[*] 该消息类型为: %d，可能是表情，图片, 链接或红包' % msg['MsgType']}
                 self._showMsg(raw_msg)
 
+    #后台监听进程，定时20ms检查一次是否有新消息，并根据不同的消息类型进行相应处理
     def listenMsgMode(self):
         print('[*] 进入消息监听模式 ... 成功')
         logging.debug('[*] 进入消息监听模式 ... 成功')
@@ -883,6 +912,7 @@ class WebWeixin(object):
             if (time.time() - self.lastCheckTs) <= 20:
                 time.sleep(time.time() - self.lastCheckTs)
 
+    #同上边4个一样也是发送消息的函数，多了些日志输出，主要是主线程触发执行
     def sendMsg(self, name, word, isfile=False):
         id = self.getUSerID(name)
         if id:
@@ -986,7 +1016,9 @@ class WebWeixin(object):
             print('[*] 自动回复模式 ... 关闭')
             logging.debug('[*] 自动回复模式 ... 关闭')
 
-        if sys.platform.startswith('win'):
+
+        #打开一个字线程执行后台监听函数listenMsgMode
+        if sys.platform.startswith('win'): #windows
             import _thread
             _thread.start_new_thread(self.listenMsgMode())
         else:
